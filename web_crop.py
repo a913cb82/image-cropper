@@ -24,10 +24,12 @@ def index():
     return HTML
 
 
-def _save_crop(idx, cx, cy, cw):
+def _save_crop(idx, cx, cy, cw, rotation=0):
     original = Image.open(images[idx])
     fmt = original.format
     img = ImageOps.exif_transpose(original)
+    if rotation:
+        img = img.rotate(-rotation, expand=True)
     img_w, img_h = img.size
     crop_w = cw * img_w
     crop_h = crop_w / ratio
@@ -111,7 +113,7 @@ def approve():
         return "", 404
     data = request.json
     save_idx = current_idx
-    threading.Thread(target=_save_crop, args=(save_idx, data["cx"], data["cy"], data["cw"]), daemon=True).start()
+    threading.Thread(target=_save_crop, args=(save_idx, data["cx"], data["cy"], data["cw"], data.get("rotation", 0)), daemon=True).start()
     current_idx += 1
     if current_idx >= len(images):
         return jsonify({"done": True})
@@ -156,12 +158,13 @@ let info = null;
 let img = null;
 let dragging = false, dragSX = 0, dragSY = 0;
 
-// View state: zoom level and pan offset (canvas pixels)
-let zoom = 1.0, panX = 0, panY = 0;
+// View state: zoom level, pan offset (canvas pixels), rotation (degrees)
+let zoom = 1.0, panX = 0, panY = 0, rotation = 0;
 
 // Display geometry (recalculated each draw)
 let pw = 0, ph = 0, imgScale = 0, imgOffX = 0, imgOffY = 0;
 let cropPx = 0, cropPy = 0, rx = 0, ry = 0;
+let rotW = 0, rotH = 0;
 
 // Pre-fetch cache
 const prefetchCache = new Map();
@@ -178,10 +181,15 @@ function calcGeometry() {
   canvas.width = pw;
   canvas.height = ph;
   if (!img) return;
-  const baseScale = Math.min(pw / img.width, ph / img.height);
+  // Rotated bounding box
+  const rad = rotation * Math.PI / 180;
+  const cos = Math.abs(Math.cos(rad)), sin = Math.abs(Math.sin(rad));
+  rotW = cos * img.width + sin * img.height;
+  rotH = sin * img.width + cos * img.height;
+  const baseScale = Math.min(pw / rotW, ph / rotH);
   imgScale = baseScale * zoom;
-  const imgW = img.width * imgScale;
-  const imgH = img.height * imgScale;
+  const imgW = rotW * imgScale;
+  const imgH = rotH * imgScale;
   imgOffX = (pw - imgW) / 2 + panX;
   imgOffY = (ph - imgH) / 2 + panY;
   // Size crop box to fit within canvas in both dimensions
@@ -193,17 +201,16 @@ function calcGeometry() {
 
 function constrainView() {
   if (!img) return;
-  const baseScale = Math.min(pw / img.width, ph / img.height);
-  const imgW = img.width * baseScale * zoom;
-  const imgH = img.height * baseScale * zoom;
+  // Use rotated bounds for min zoom
+  const baseScale = Math.min(pw / rotW, ph / rotH);
   // Zoom: image must be large enough that crop box fits inside it
-  const minZoomX = cropPx / (baseScale * img.width);
-  const minZoomY = cropPy / (baseScale * img.height);
+  const minZoomX = cropPx / (baseScale * rotW);
+  const minZoomY = cropPy / (baseScale * rotH);
   const minZoom = Math.max(minZoomX, minZoomY);
   if (zoom < minZoom) zoom = minZoom;
   // Recalc image size after zoom clamp
-  const imgW2 = img.width * baseScale * zoom;
-  const imgH2 = img.height * baseScale * zoom;
+  const imgW2 = rotW * baseScale * zoom;
+  const imgH2 = rotH * baseScale * zoom;
   const maxPanX = imgW2 / 2 - cropPx / 2;
   const maxPanY = imgH2 / 2 - cropPy / 2;
   panX = Math.max(-maxPanX, Math.min(maxPanX, panX));
@@ -214,21 +221,21 @@ function resetView() {
   zoom = 1.0;
   panX = 0;
   panY = 0;
+  rotation = 0;
   calcGeometry();
   constrainView();
   calcGeometry();
 }
 
 function getCropParams() {
-  const imgW = img.width * imgScale;
-  const imgH = img.height * imgScale;
   const cx_img = (pw / 2 - imgOffX) / imgScale;
   const cy_img = (ph / 2 - imgOffY) / imgScale;
   const cw_img = cropPx / imgScale;
   return {
-    cx: cx_img / img.width,
-    cy: cy_img / img.height,
-    cw: cw_img / img.width,
+    cx: cx_img / rotW,
+    cy: cy_img / rotH,
+    cw: cw_img / rotW,
+    rotation: rotation,
   };
 }
 
@@ -304,19 +311,32 @@ async function loadImage() {
   });
 }
 
+function drawRotated(imgEl, imgScale, imgOffX, imgOffY, rotW, rotH, rotation) {
+  const rad = rotation * Math.PI / 180;
+  const cx = imgOffX + rotW * imgScale / 2;
+  const cy = imgOffY + rotH * imgScale / 2;
+  const dw = imgEl.width * imgScale;
+  const dh = imgEl.height * imgScale;
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate(rad);
+  ctx.drawImage(imgEl, -dw / 2, -dh / 2, dw, dh);
+  ctx.restore();
+}
+
 function draw() {
   if (!img || !info) return;
   calcGeometry();
 
-  const imgW = img.width * imgScale;
-  const imgH = img.height * imgScale;
+  const imgW = rotW * imgScale;
+  const imgH = rotH * imgScale;
 
   // Dark background
   ctx.fillStyle = "#121212";
   ctx.fillRect(0, 0, pw, ph);
 
-  // Image
-  ctx.drawImage(img, imgOffX, imgOffY, imgW, imgH);
+  // Rotated image
+  drawRotated(img, imgScale, imgOffX, imgOffY, rotW, rotH, rotation);
 
   // Dim overlay
   ctx.fillStyle = "rgba(0,0,0,0.6)";
@@ -327,7 +347,7 @@ function draw() {
   ctx.beginPath();
   ctx.rect(rx, ry, cropPx, cropPy);
   ctx.clip();
-  ctx.drawImage(img, imgOffX, imgOffY, imgW, imgH);
+  drawRotated(img, imgScale, imgOffX, imgOffY, rotW, rotH, rotation);
   ctx.restore();
 
   // Yellow border
@@ -373,10 +393,13 @@ function draw() {
 
   hud.textContent =
     `Image ${info.index + 1}/${info.total}\n` +
-    `File: ${info.filename}\n\n` +
+    `File: ${info.filename}\n` +
+    (rotation ? `Rotation: ${rotation.toFixed(1)}°\n` : '') +
+    `\n` +
     `Controls:\n` +
     `  [Left-Click + Drag] : Pan Image\n` +
     `  [Scroll Wheel]      : Zoom In/Out\n` +
+    `  [Shift + Scroll]    : Rotate\n` +
     `  [Space] / [Enter]   : Approve & Save\n` +
     `  [Left] / [Right]    : Navigate without saving`;
 }
@@ -450,13 +473,20 @@ canvas.addEventListener("wheel", e => {
   clearTimeout(scrollTimer);
   scrollTimer = setTimeout(() => { scrollCount = 0; }, 300);
   const speed = Math.min(3, 0.5 + scrollCount * 0.5);
-  const factor = e.deltaY < 0 ? Math.pow(1 / 0.95, speed) : Math.pow(0.95, speed);
-  // Scale pan proportionally so zoom stays centered on crop box
-  panX *= factor;
-  panY *= factor;
-  zoom *= factor;
-  constrainView();
-  draw();
+  if (e.shiftKey) {
+    const deg = speed * (e.deltaY < 0 ? 1 : -1);
+    rotation += deg;
+    calcGeometry();
+    constrainView();
+    draw();
+  } else {
+    const factor = e.deltaY < 0 ? Math.pow(1 / 0.95, speed) : Math.pow(0.95, speed);
+    panX *= factor;
+    panY *= factor;
+    zoom *= factor;
+    constrainView();
+    draw();
+  }
 }, { passive: false });
 
 // --- Keyboard ---

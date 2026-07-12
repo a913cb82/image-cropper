@@ -17,10 +17,13 @@ python3 -m venv .venv
 
 Open http://localhost:5000 in a browser. Cropped images save to `<input_folder>/cropped_9_20/`.
 
+On startup, automatically navigates to the first image without a saved crop.
+
 ## Controls
 
-- **Left-Click + Drag**: Move crop box
-- **Scroll Wheel**: Zoom crop box (accelerating speed with rapid scrolls)
+- **Left-Click + Drag**: Pan image
+- **Scroll Wheel**: Zoom in/out (accelerating speed with rapid scrolls)
+- **Shift + Scroll**: Rotate (accelerating speed with rapid scrolls)
 - **Space / Enter**: Approve crop and advance to next image
 - **Left / Right arrows**: Navigate without saving
 
@@ -38,16 +41,19 @@ Single-file Flask app (`web_crop.py`) with inline HTML/JS.
 - `_info_cache` / `_image_cache` dicts avoid re-encoding on repeated requests
 
 ### Frontend (Canvas)
-- All crop positioning (cx, cy, cw) is normalized 0.0-1.0 relative to image dimensions
-- `constrainCrop()` clamps crop box to image boundaries client-side (no server round-trip during drag/zoom)
-- Prefetch cache (`Map<idx, {img, info, baseCanvas}>`) holds ±5 images around current index
+- Crop box is fixed-size on screen, centered; image pans/zooms behind it
+- View state: `zoom`, `panX`, `panY`, `rotation` (degrees)
+- `calcGeometry()` computes rotated bounding box (`rotW`, `rotH`) for sizing
+- `constrainView()` clamps zoom (crop box must fit inside image) and pan
+- Rotation uses `ctx.rotate()` (clockwise); server negates for Pillow (counterclockwise)
+- Crop params sent to server in rotated-image coordinate space with rotation angle
+- Prefetch cache (`Map<idx, {img, info}>`) holds ±5 images around current index
 - Inflight request tracking prevents duplicate fetches when scrolling to a partially-loaded image
-- OffscreenCanvas pre-rendering: each cached image is pre-rendered into a dimmed base canvas and a full-res image canvas at display size, so `draw()` just blits pre-rendered buffers + draws the crop box overlay
 
 ### API Endpoints
 - `GET /api/info?idx=N` — image metadata (dimensions, max crop width, has_crop)
 - `GET /api/image?idx=N` — JPEG thumbnail for display
-- `POST /api/approve` — save crop in background thread, advance index
+- `POST /api/approve` — save crop in background thread, advance index (accepts rotation)
 - `POST /api/navigate` — move index by direction (-1 or +1)
 
 ## Files
