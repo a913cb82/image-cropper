@@ -342,6 +342,27 @@ function draw() {
   ctx.lineWidth = 2;
   ctx.strokeRect(rx, ry, cropPx, cropPy);
 
+  // Guide lines
+  ctx.strokeStyle = "rgba(255,255,255,0.5)";
+  ctx.lineWidth = 1;
+  // Vertical center line
+  ctx.beginPath();
+  ctx.moveTo(rx + cropPx / 2, ry);
+  ctx.lineTo(rx + cropPx / 2, ry + cropPy);
+  ctx.stroke();
+  // Thirds lines (fainter)
+  ctx.strokeStyle = "rgba(255,255,255,0.25)";
+  ctx.beginPath();
+  ctx.moveTo(rx + cropPx / 3, ry);
+  ctx.lineTo(rx + cropPx / 3, ry + cropPy);
+  ctx.moveTo(rx + cropPx * 2 / 3, ry);
+  ctx.lineTo(rx + cropPx * 2 / 3, ry + cropPy);
+  ctx.moveTo(rx, ry + cropPy / 3);
+  ctx.lineTo(rx + cropPx, ry + cropPy / 3);
+  ctx.moveTo(rx, ry + cropPy * 2 / 3);
+  ctx.lineTo(rx + cropPx, ry + cropPy * 2 / 3);
+  ctx.stroke();
+
   // Green checkmark if crop already saved
   if (info.has_crop) {
     const s = 28, pad = 16;
