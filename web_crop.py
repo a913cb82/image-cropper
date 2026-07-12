@@ -150,90 +150,95 @@ const canvas = document.getElementById("c");
 const ctx = canvas.getContext("2d");
 const hud = document.getElementById("hud");
 const RATIO = 9 / 20;
+const CROP_FRAC = 0.95;
 
 let info = null;
 let img = null;
-let dispW = 0, dispH = 0, offX = 0, offY = 0;
 let dragging = false, dragSX = 0, dragSY = 0;
 
-// Client-side crop state
-let cx = 0.5, cy = 0.5, cw = 0.8;
+// View state: zoom level and pan offset (canvas pixels)
+let zoom = 1.0, panX = 0, panY = 0;
 
-// Pre-fetch cache: Map<idx, { img: Image, info: Object, baseCanvas: OffscreenCanvas|null }>
+// Display geometry (recalculated each draw)
+let pw = 0, ph = 0, imgScale = 0, imgOffX = 0, imgOffY = 0;
+let cropPx = 0, cropPy = 0, rx = 0, ry = 0;
+
+// Pre-fetch cache
 const prefetchCache = new Map();
 const inflight = new Map();
 const PREFETCH_RANGE = 5;
-let lastCanvasW = 0, lastCanvasH = 0;
 
 // Scroll acceleration
 let scrollCount = 0;
 let scrollTimer = null;
 
-function constrainCrop() {
-  if (!info) return;
-  const max_cw = Math.min(1.0, info.max_cw);
-  cw = Math.max(0.02, Math.min(max_cw, cw));
-  const hw = cw / 2;
-  const hh = (cw * info.img_w / RATIO) / info.img_h / 2;
-  cx = Math.max(hw, Math.min(1.0 - hw, cx));
-  cy = Math.max(hh, Math.min(1.0 - hh, cy));
+function calcGeometry() {
+  pw = canvas.parentElement.clientWidth;
+  ph = canvas.parentElement.clientHeight;
+  canvas.width = pw;
+  canvas.height = ph;
+  if (!img) return;
+  const baseScale = Math.min(pw / img.width, ph / img.height);
+  imgScale = baseScale * zoom;
+  const imgW = img.width * imgScale;
+  const imgH = img.height * imgScale;
+  imgOffX = (pw - imgW) / 2 + panX;
+  imgOffY = (ph - imgH) / 2 + panY;
+  // Size crop box to fit within canvas in both dimensions
+  cropPx = Math.min(pw * CROP_FRAC, ph * RATIO * CROP_FRAC);
+  cropPy = cropPx / RATIO;
+  rx = (pw - cropPx) / 2;
+  ry = (ph - cropPy) / 2;
 }
 
-function resetCrop() {
-  cx = 0.5;
-  cy = 0.5;
-  cw = info.max_cw * 0.9;
-  constrainCrop();
+function constrainView() {
+  if (!img) return;
+  const baseScale = Math.min(pw / img.width, ph / img.height);
+  const imgW = img.width * baseScale * zoom;
+  const imgH = img.height * baseScale * zoom;
+  // Zoom: image must be large enough that crop box fits inside it
+  const minZoomX = cropPx / (baseScale * img.width);
+  const minZoomY = cropPy / (baseScale * img.height);
+  const minZoom = Math.max(minZoomX, minZoomY);
+  if (zoom < minZoom) zoom = minZoom;
+  // Recalc image size after zoom clamp
+  const imgW2 = img.width * baseScale * zoom;
+  const imgH2 = img.height * baseScale * zoom;
+  const maxPanX = imgW2 / 2 - cropPx / 2;
+  const maxPanY = imgH2 / 2 - cropPy / 2;
+  panX = Math.max(-maxPanX, Math.min(maxPanX, panX));
+  panY = Math.max(-maxPanY, Math.min(maxPanY, panY));
 }
 
-function renderBaseCanvas(image, pw, ph) {
-  const oc = new OffscreenCanvas(pw, ph);
-  const octx = oc.getContext("2d");
-  const scale = Math.min(pw / image.width, ph / image.height);
-  const dW = Math.round(image.width * scale);
-  const dH = Math.round(image.height * scale);
-  const oX = Math.round((pw - dW) / 2);
-  const oY = Math.round((ph - dH) / 2);
-  // Full image at display size (used for crop punch-out)
-  const imgCanvas = new OffscreenCanvas(pw, ph);
-  const imgCtx = imgCanvas.getContext("2d");
-  imgCtx.drawImage(image, oX, oY, dW, dH);
-  // Dimmed version (base layer)
-  octx.drawImage(imgCanvas, 0, 0);
-  octx.fillStyle = "rgba(0,0,0,0.6)";
-  octx.fillRect(oX, oY, dW, dH);
-  return { oc, imgCanvas, dW, dH, oX, oY };
+function resetView() {
+  zoom = 1.0;
+  panX = 0;
+  panY = 0;
+  calcGeometry();
+  constrainView();
+  calcGeometry();
 }
 
-function invalidateBaseCache() {
-  for (const entry of prefetchCache.values()) { entry.baseCanvas = null; entry.imgCanvas = null; }
-}
-
-function getBase(idx, pw, ph) {
-  const entry = prefetchCache.get(idx);
-  if (!entry) return null;
-  if (entry.baseCanvas && entry.baseW === pw && entry.baseH === ph) {
-    return entry.baseCanvas;
-  }
-  const { oc, imgCanvas, dW, dH, oX, oY } = renderBaseCanvas(entry.img, pw, ph);
-  entry.baseCanvas = oc;
-  entry.imgCanvas = imgCanvas;
-  entry.baseW = pw;
-  entry.baseH = ph;
-  entry._dW = dW;
-  entry._dH = dH;
-  entry._oX = oX;
-  entry._oY = oY;
-  return oc;
+function getCropParams() {
+  const imgW = img.width * imgScale;
+  const imgH = img.height * imgScale;
+  const cx_img = (pw / 2 - imgOffX) / imgScale;
+  const cy_img = (ph / 2 - imgOffY) / imgScale;
+  const cw_img = cropPx / imgScale;
+  return {
+    cx: cx_img / img.width,
+    cy: cy_img / img.height,
+    cw: cw_img / img.width,
+  };
 }
 
 async function loadState() {
   const r = await fetch("/api/info");
   info = await r.json();
-  resetCrop();
   const cached = prefetchCache.get(info.index);
   if (cached) {
     img = cached.img;
+    resetView();
     draw();
   } else {
     await loadImage();
@@ -254,7 +259,7 @@ function loadImageFromIdx(idx) {
     const url = URL.createObjectURL(blob);
     return new Promise(resolve => {
       const i = new Image();
-      i.onload = () => { URL.revokeObjectURL(url); prefetchCache.set(idx, { img: i, info: infoData, baseCanvas: null, baseW: 0, baseH: 0 }); inflight.delete(idx); resolve(); };
+      i.onload = () => { URL.revokeObjectURL(url); prefetchCache.set(idx, { img: i, info: infoData }); inflight.delete(idx); resolve(); };
       i.src = url;
     });
   })().catch(() => { inflight.delete(idx); });
@@ -271,7 +276,6 @@ function startPrefetch() {
       loadImageFromIdx(idx);
     }
   }
-  // Prune entries outside range to limit memory
   for (const [k] of prefetchCache) {
     if (Math.abs(k - cur) > PREFETCH_RANGE + 2) prefetchCache.delete(k);
   }
@@ -281,11 +285,12 @@ async function loadImage() {
   if (inflight.has(info.index)) {
     await inflight.get(info.index);
     const cached = prefetchCache.get(info.index);
-    if (cached) { img = cached.img; draw(); return; }
+    if (cached) { img = cached.img; resetView(); draw(); return; }
   }
   if (prefetchCache.has(info.index)) {
     const cached = prefetchCache.get(info.index);
     img = cached.img;
+    resetView();
     draw();
     return;
   }
@@ -294,47 +299,35 @@ async function loadImage() {
   const url = URL.createObjectURL(blob);
   const i = new Image();
   return new Promise(resolve => {
-    i.onload = () => { URL.revokeObjectURL(url); img = i; prefetchCache.set(info.index, { img: i, info, baseCanvas: null, baseW: 0, baseH: 0 }); draw(); resolve(); };
+    i.onload = () => { URL.revokeObjectURL(url); img = i; prefetchCache.set(info.index, { img: i, info }); resetView(); draw(); resolve(); };
     i.src = url;
   });
 }
 
 function draw() {
   if (!img || !info) return;
-  const pw = canvas.parentElement.clientWidth;
-  const ph = canvas.parentElement.clientHeight;
-  const sizeChanged = (canvas.width !== pw || canvas.height !== ph);
-  if (sizeChanged) {
-    canvas.width = pw;
-    canvas.height = ph;
-    invalidateBaseCache();
-  }
+  calcGeometry();
 
-  const base = getBase(info.index, pw, ph);
-  if (!base) return;
-  const entry = prefetchCache.get(info.index);
-  dispW = entry._dW;
-  dispH = entry._dH;
-  offX = entry._oX;
-  offY = entry._oY;
+  const imgW = img.width * imgScale;
+  const imgH = img.height * imgScale;
 
-  ctx.clearRect(0, 0, pw, ph);
-  ctx.drawImage(base, 0, 0);
+  // Dark background
+  ctx.fillStyle = "#121212";
+  ctx.fillRect(0, 0, pw, ph);
 
-  // Crop box in canvas pixels
-  const cropPx = cw * dispW;
-  const cropPy = cropPx / RATIO;
-  const cropCx = cx * dispW + offX;
-  const cropCy = cy * dispH + offY;
-  const rx = cropCx - cropPx / 2;
-  const ry = cropCy - cropPy / 2;
+  // Image
+  ctx.drawImage(img, imgOffX, imgOffY, imgW, imgH);
 
-  // Punch out crop region (draw pre-rendered image in clip)
+  // Dim overlay
+  ctx.fillStyle = "rgba(0,0,0,0.6)";
+  ctx.fillRect(0, 0, pw, ph);
+
+  // Punch out crop region
   ctx.save();
   ctx.beginPath();
   ctx.rect(rx, ry, cropPx, cropPy);
   ctx.clip();
-  ctx.drawImage(entry.imgCanvas, 0, 0);
+  ctx.drawImage(img, imgOffX, imgOffY, imgW, imgH);
   ctx.restore();
 
   // Yellow border
@@ -345,12 +338,10 @@ function draw() {
   // Guide lines
   ctx.strokeStyle = "rgba(255,255,255,0.5)";
   ctx.lineWidth = 1;
-  // Vertical center line
   ctx.beginPath();
   ctx.moveTo(rx + cropPx / 2, ry);
   ctx.lineTo(rx + cropPx / 2, ry + cropPy);
   ctx.stroke();
-  // Thirds lines (fainter)
   ctx.strokeStyle = "rgba(255,255,255,0.25)";
   ctx.beginPath();
   ctx.moveTo(rx + cropPx / 3, ry);
@@ -384,19 +375,19 @@ function draw() {
     `Image ${info.index + 1}/${info.total}\n` +
     `File: ${info.filename}\n\n` +
     `Controls:\n` +
-    `  [Left-Click + Drag] : Slide Crop Box\n` +
-    `  [Scroll Wheel]      : Zoom Crop Box\n` +
+    `  [Left-Click + Drag] : Pan Image\n` +
+    `  [Scroll Wheel]      : Zoom In/Out\n` +
     `  [Space] / [Enter]   : Approve & Save\n` +
     `  [Left] / [Right]    : Navigate without saving`;
 }
 
 async function approve() {
-  const saveCx = cx, saveCy = cy, saveCw = cw;
+  const cp = getCropParams();
   const nextIdx = info.index + 1;
   fetch("/api/approve", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ cx: saveCx, cy: saveCy, cw: saveCw }),
+    body: JSON.stringify(cp),
   });
   if (nextIdx >= info.total) {
     hud.textContent = "Processing complete!";
@@ -406,7 +397,7 @@ async function approve() {
   if (cached) {
     img = cached.img;
     info = cached.info;
-    resetCrop();
+    resetView();
     draw();
     startPrefetch();
   } else {
@@ -426,7 +417,7 @@ async function navigate(dir) {
   if (cached) {
     img = cached.img;
     info = cached.info;
-    resetCrop();
+    resetView();
     draw();
     startPrefetch();
   } else {
@@ -443,13 +434,11 @@ canvas.addEventListener("mousedown", e => {
 
 window.addEventListener("mousemove", e => {
   if (!dragging) return;
-  const dx = e.clientX - dragSX;
-  const dy = e.clientY - dragSY;
-  cx += dx / dispW;
-  cy += dy / dispH;
+  panX += e.clientX - dragSX;
+  panY += e.clientY - dragSY;
   dragSX = e.clientX;
   dragSY = e.clientY;
-  constrainCrop();
+  constrainView();
   draw();
 });
 
@@ -457,15 +446,16 @@ window.addEventListener("mouseup", () => { dragging = false; });
 
 canvas.addEventListener("wheel", e => {
   e.preventDefault();
-  // Accelerating zoom: 1x, 1.5x, 2x, 2.5x, 3x capped
   scrollCount++;
   clearTimeout(scrollTimer);
   scrollTimer = setTimeout(() => { scrollCount = 0; }, 300);
   const speed = Math.min(3, 0.5 + scrollCount * 0.5);
-  const base = 0.95;
-  const factor = e.deltaY < 0 ? Math.pow(base, speed) : Math.pow(1 / base, speed);
-  cw *= factor;
-  constrainCrop();
+  const factor = e.deltaY < 0 ? Math.pow(1 / 0.95, speed) : Math.pow(0.95, speed);
+  // Scale pan proportionally so zoom stays centered on crop box
+  panX *= factor;
+  panY *= factor;
+  zoom *= factor;
+  constrainView();
   draw();
 }, { passive: false });
 
@@ -498,5 +488,10 @@ if __name__ == "__main__":
     if not images:
         print("No images found.")
         sys.exit(1)
+    # Start at first image without an existing crop
+    for i, path in enumerate(images):
+        if not os.path.exists(os.path.join(output_dir, os.path.basename(path))):
+            current_idx = i
+            break
     print(f"Found {len(images)} images. Opening http://localhost:5000")
     app.run(host="0.0.0.0", port=5000, debug=True, threaded=True)
