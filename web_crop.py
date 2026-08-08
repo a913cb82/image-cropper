@@ -349,18 +349,30 @@ function calcGeometry() {
 
 function constrainView() {
   if (!img) return;
-  // Zoom: image must be large enough that crop box fits inside it
-  const minZoomX = cropPx / (baseScale * rotW);
-  const minZoomY = cropPy / (baseScale * rotH);
+  const rad = rotation * Math.PI / 180;
+  const cosA = Math.abs(Math.cos(rad)), sinA = Math.abs(Math.sin(rad));
+  // Projected extent of the (rotated) crop box in image-local axes
+  const bw = cropPx * cosA + cropPy * sinA;
+  const bh = cropPx * sinA + cropPy * cosA;
+  // Zoom: image must be large enough that the crop box fits inside it
+  const minZoomX = bw / (img.width * baseScale);
+  const minZoomY = bh / (img.height * baseScale);
   const minZoom = Math.max(minZoomX, minZoomY);
   if (zoom < minZoom) zoom = minZoom;
-  // Recalc image size after zoom clamp
-  const imgW2 = rotW * baseScale * zoom;
-  const imgH2 = rotH * baseScale * zoom;
-  const maxPanX = imgW2 / 2 - cropPx / 2;
-  const maxPanY = imgH2 / 2 - cropPy / 2;
-  panX = Math.max(-maxPanX, Math.min(maxPanX, panX));
-  panY = Math.max(-maxPanY, Math.min(maxPanY, panY));
+  imgScale = baseScale * zoom;
+  // Pan: clamp so the crop stays inside the actual image footprint, so
+  // black can never enter the crop (same constraint rotation uses)
+  const cos = Math.cos(rad), sin = Math.sin(rad);
+  const tx = panX * cos + panY * sin;
+  const ty = -panX * sin + panY * cos;
+  const iw = img.width * imgScale;
+  const ih = img.height * imgScale;
+  const maxTx = (iw - bw) / 2;
+  const maxTy = (ih - bh) / 2;
+  const txc = Math.max(-maxTx, Math.min(maxTx, tx));
+  const tyc = Math.max(-maxTy, Math.min(maxTy, ty));
+  panX = txc * cos - tyc * sin;
+  panY = txc * sin + tyc * cos;
 }
 
 function resetView() {
@@ -378,36 +390,12 @@ function setRotation(deg) {
   fitCropToImage();
 }
 
-// Remove black space in the crop: first try panning alone (works when the
-// crop box fits inside the rotated image and black is only on one side).
-// Only zoom when the crop cannot fit at the current zoom (e.g. black on
-// both top and bottom).
+// Constrain pan/zoom so the crop box never extends into black space.
+// Pan is clamped in the rotated image frame; zoom is only raised when the
+// crop cannot fit the image at the current zoom (e.g. after a large rotation).
 function fitCropToImage() {
   if (!img) return;
   calcGeometry();
-  const rad = rotation * Math.PI / 180;
-  const cosA = Math.abs(Math.cos(rad));
-  const sinA = Math.abs(Math.sin(rad));
-  // Projected extent of the rotated crop box in image-local axes
-  const bw = cropPx * cosA + cropPy * sinA;
-  const bh = cropPx * sinA + cropPy * cosA;
-  const baseS = baseScale;
-  // Zoom only if the crop cannot fit the image at the current zoom
-  const needZ = Math.max(bw / (img.width * baseS), bh / (img.height * baseS));
-  if (needZ > zoom) zoom = needZ;
-  // Recompute geometry, then clamp pan so the crop stays inside the image
-  calcGeometry();
-  const cos = Math.cos(rad), sin = Math.sin(rad);
-  const tx = panX * cos + panY * sin;
-  const ty = -panX * sin + panY * cos;
-  const iw = img.width * imgScale;
-  const ih = img.height * imgScale;
-  const maxTx = (iw - bw) / 2;
-  const maxTy = (ih - bh) / 2;
-  const txc = Math.max(-maxTx, Math.min(maxTx, tx));
-  const tyc = Math.max(-maxTy, Math.min(maxTy, ty));
-  panX = txc * cos - tyc * sin;
-  panY = txc * sin + tyc * cos;
   constrainView();
   calcGeometry();
   draw();

@@ -183,18 +183,38 @@ try:
     assert after["bg"] == 0, f"Black space still present after rotating: {after['bg']} px"
     print("  PASS\n")
 
-    # Test 7: Pan-induced black space is fixed by panning, not zooming
-    print("Test 7: Pan-only black space fix does not zoom")
+    # Test 7: Panning is blocked so black never enters the crop (no zooming)
+    print("Test 7: Panning forbids black space without zooming")
+    # Simulate a long mouse drag toward the top-right corner
+    from selenium.webdriver.common.action_chains import ActionChains
+    from selenium.webdriver.common.actions.action_builder import ActionBuilder
+    canvas = driver.find_element("id", "c")
     zoom_before = driver.execute_script("return zoom")
-    # Pan far enough that crop sticks out of image on one side (black space)
-    driver.execute_script("panY = ph * 0.4; fitCropToImage();")
+    pan_before = driver.execute_script("return [panX, panY]")
+    # Drag via pointer events (the app listens on window mousemove)
+    driver.execute_script("""
+        const c = document.getElementById('c');
+        const r = c.getBoundingClientRect();
+        const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+        function fire(type, x, y) {
+          const e = new PointerEvent(type, { clientX: x, clientY: y, bubbles: true });
+          (type === 'mousedown' ? c : window).dispatchEvent(e);
+        }
+        fire('mousedown', cx, cy);
+        for (let i = 1; i <= 20; i++) {
+          fire('mousemove', cx + i * 40, cy - i * 40);
+        }
+        fire('mouseup', cx + 800, cy - 800);
+    """)
     time.sleep(0.3)
     pan_only = crop_bg_pixels()
     zoom_after = driver.execute_script("return zoom")
-    print(f"  After pan+fit: {pan_only['bg']} bg pixels, zoom {zoom_before:.3f} -> {zoom_after:.3f}")
+    pan_after = driver.execute_script("return [panX, panY]")
+    print(f"  After drag: {pan_only['bg']} bg pixels, zoom {zoom_before:.3f} -> {zoom_after:.3f}, pan {pan_before} -> {pan_after}")
     screenshot("test7_pan_only_fit")
-    assert pan_only["bg"] == 0, f"Black space after pan fit: {pan_only['bg']} px"
-    assert zoom_after <= zoom_before + 1e-6, f"Zoom increased when pan alone should suffice: {zoom_before} -> {zoom_after}"
+    assert pan_only["bg"] == 0, f"Black space entered crop during pan: {pan_only['bg']} px"
+    assert zoom_after <= zoom_before + 1e-6, f"Zoom increased during pan: {zoom_before} -> {zoom_after}"
+    assert pan_after != pan_before, "Pan did not move at all"
     print("  PASS\n")
 
     print("All tests passed!")

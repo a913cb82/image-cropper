@@ -47,8 +47,8 @@ Single-file Flask app (`web_crop.py`) with inline HTML/JS.
 - Crop box is fixed-size on screen, centered; image pans/zooms behind it
 - View state: `zoom`, `panX`, `panY`, `rotation` (degrees)
 - `calcGeometry()` computes rotated bounding box (`rotW`, `rotH`) for sizing; `baseScale` derives from the unrotated image so `imgScale` stays stable during rotation
-- `constrainView()` clamps zoom (crop box must fit inside image) and pan
-- `fitCropToImage()` removes black space: pans first to keep crop inside the rotated image, zooming only if needed. Called on every `setRotation()`
+- `constrainView()` clamps zoom (crop box must fit inside image) and pan; pan is clamped in the rotated image frame so black can never enter the crop
+- `fitCropToImage()` calls `constrainView()`. Called on every `setRotation()`
 - Rotation uses `ctx.rotate()` (clockwise); server negates for Pillow (counterclockwise)
 - Crop params sent to server in rotated-image coordinate space with rotation angle
 - Prefetch cache (`Map<idx, {img, info}>`) holds ±5 images around current index
