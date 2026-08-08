@@ -183,18 +183,8 @@ try:
     assert after["bg"] == 0, f"Black space still present after rotating: {after['bg']} px"
     print("  PASS\n")
 
-    # Test 7: Z still removes black space when rotation is already fitted
-    print("Test 7: [Z] zoom-to-fit keeps no black space")
-    body.send_keys("z")
-    time.sleep(0.8)
-    z_after = crop_bg_pixels()
-    print(f"  After [Z]: {z_after['bg']} bg pixels / {z_after['total']} sampled")
-    screenshot("test7_zoom_fit")
-    assert z_after["bg"] == 0, f"Black space after [Z]: {z_after['bg']} px"
-    print("  PASS\n")
-
-    # Test 8: Pan-induced black space is fixed by panning, not zooming
-    print("Test 8: Pan-only black space fix does not zoom")
+    # Test 7: Pan-induced black space is fixed by panning, not zooming
+    print("Test 7: Pan-only black space fix does not zoom")
     zoom_before = driver.execute_script("return zoom")
     # Pan far enough that crop sticks out of image on one side (black space)
     driver.execute_script("panY = ph * 0.4; fitCropToImage();")
@@ -202,7 +192,7 @@ try:
     pan_only = crop_bg_pixels()
     zoom_after = driver.execute_script("return zoom")
     print(f"  After pan+fit: {pan_only['bg']} bg pixels, zoom {zoom_before:.3f} -> {zoom_after:.3f}")
-    screenshot("test8_pan_only_fit")
+    screenshot("test7_pan_only_fit")
     assert pan_only["bg"] == 0, f"Black space after pan fit: {pan_only['bg']} px"
     assert zoom_after <= zoom_before + 1e-6, f"Zoom increased when pan alone should suffice: {zoom_before} -> {zoom_after}"
     print("  PASS\n")

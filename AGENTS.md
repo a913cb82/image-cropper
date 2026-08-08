@@ -25,7 +25,6 @@ On startup, automatically navigates to the first image without a saved crop.
 - **Scroll Wheel**: Zoom in/out (accelerating speed with rapid scrolls)
 - **Rotate Bar** (bottom): Drag horizontally to rotate image around its center (-90° to +90°); auto-fits to remove black space
 - **R**: Auto-rotate to horizon (Hough + RANSAC horizon detection, computed in background)
-- **Z**: Manually zoom to fit crop inside image
 - **Space / Enter**: Approve crop and advance to next image
 - **Left / Right arrows**: Navigate without saving
 
@@ -50,7 +49,6 @@ Single-file Flask app (`web_crop.py`) with inline HTML/JS.
 - `calcGeometry()` computes rotated bounding box (`rotW`, `rotH`) for sizing; `baseScale` derives from the unrotated image so `imgScale` stays stable during rotation
 - `constrainView()` clamps zoom (crop box must fit inside image) and pan
 - `fitCropToImage()` removes black space: pans first to keep crop inside the rotated image, zooming only if needed. Called on every `setRotation()`
-- `zoomToFitCrop()` ([Z] key) forces minimal zoom for the crop to fit the rotated image at the current pan
 - Rotation uses `ctx.rotate()` (clockwise); server negates for Pillow (counterclockwise)
 - Crop params sent to server in rotated-image coordinate space with rotation angle
 - Prefetch cache (`Map<idx, {img, info}>`) holds ±5 images around current index

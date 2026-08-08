@@ -413,30 +413,6 @@ function fitCropToImage() {
   draw();
 }
 
-function zoomToFitCrop() {
-  if (!img) return;
-  const rad = rotation * Math.PI / 180;
-  const cos = Math.cos(rad), sin = Math.sin(rad);
-  const cw = cropPx / 2, ch = cropPy / 2;
-  const baseS = baseScale;
-  let need = zoom;
-  for (const sx of [cw, -cw]) {
-    for (const sy of [ch, -ch]) {
-      const relx = sx - panX;
-      const rely = sy - panY;
-      const rx = relx * cos + rely * sin;
-      const ry = -relx * sin + rely * cos;
-      need = Math.max(need,
-        2 * Math.abs(rx) / (img.width * baseS),
-        2 * Math.abs(ry) / (img.height * baseS));
-    }
-  }
-  zoom = need;
-  constrainView();
-  calcGeometry();
-  draw();
-}
-
 function getCropParams() {
   const cx_img = (pw / 2 - imgOffX) / imgScale;
   const cy_img = (ph / 2 - imgOffY) / imgScale;
@@ -634,7 +610,6 @@ function draw() {
     `  [Scroll Wheel]      : Zoom In/Out\n` +
     `  [Rotate Bar]        : Rotate Image\n` +
     `  [R]                 : Auto-Rotate to Horizon\n` +
-    `  [Z]                 : Zoom to Remove Black Space\n` +
     `  [Space] / [Enter]   : Approve & Save\n` +
     `  [Left] / [Right]    : Navigate without saving`;
 }
@@ -768,7 +743,6 @@ rotbar.addEventListener("pointercancel", () => { rotDragging = false; draw(); })
 window.addEventListener("keydown", e => {
   if (e.key === " " || e.key === "Enter") { e.preventDefault(); approve(); }
   else if (e.key === "r" || e.key === "R") { e.preventDefault(); autoRotate(); }
-  else if (e.key === "z" || e.key === "Z") { e.preventDefault(); zoomToFitCrop(); }
   else if (e.key === "ArrowLeft") { e.preventDefault(); navigate(-1); }
   else if (e.key === "ArrowRight") { e.preventDefault(); navigate(1); }
 });
