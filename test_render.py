@@ -153,6 +153,60 @@ try:
     assert "Image 1/3" in hud_back, f"Expected 'Image 1/3', got: {hud_back}"
     print("  PASS\n")
 
+    # Test 6: Rotating auto-fixes black space (pan first, zoom if needed)
+    print("Test 6: Rotation auto-fits to remove black space")
+    driver.execute_script("resetView(); setRotation(45);")
+    time.sleep(0.5)
+
+    def crop_bg_pixels():
+        return driver.execute_script("""
+            const c = document.getElementById('c');
+            const ctx = c.getContext('2d');
+            const rect = ctx.getImageData(0, 0, c.width, c.height).data;
+            const x0 = (c.width - cropPx) / 2, y0 = (c.height - cropPy) / 2;
+            let bg = 0, total = 0;
+            for (let x = Math.round(x0) + 2; x <= Math.round(x0 + cropPx) - 2; x += 8) {
+              for (let y = Math.round(y0) + 2; y <= Math.round(y0 + cropPy) - 2; y += 8) {
+                const i = (y * c.width + x) * 4;
+                if (rect[i] < 40 && rect[i+1] < 40 && rect[i+2] < 40) bg++;
+                total++;
+              }
+            }
+            return { bg, total, cropPx, cropPy, pw: c.width, ph: c.height, zoom, panX, panY, rotation };
+        """)
+
+    after = crop_bg_pixels()
+    print(f"  After rotate 45: {after['bg']} bg pixels / {after['total']} sampled")
+    screenshot("test6_rotation_fit")
+    errors_after = driver.execute_script("return window.__jsErrors || [];")
+    assert not errors_after, f"JS errors: {errors_after}"
+    assert after["bg"] == 0, f"Black space still present after rotating: {after['bg']} px"
+    print("  PASS\n")
+
+    # Test 7: Z still removes black space when rotation is already fitted
+    print("Test 7: [Z] zoom-to-fit keeps no black space")
+    body.send_keys("z")
+    time.sleep(0.8)
+    z_after = crop_bg_pixels()
+    print(f"  After [Z]: {z_after['bg']} bg pixels / {z_after['total']} sampled")
+    screenshot("test7_zoom_fit")
+    assert z_after["bg"] == 0, f"Black space after [Z]: {z_after['bg']} px"
+    print("  PASS\n")
+
+    # Test 8: Pan-induced black space is fixed by panning, not zooming
+    print("Test 8: Pan-only black space fix does not zoom")
+    zoom_before = driver.execute_script("return zoom")
+    # Pan far enough that crop sticks out of image on one side (black space)
+    driver.execute_script("panY = ph * 0.4; fitCropToImage();")
+    time.sleep(0.3)
+    pan_only = crop_bg_pixels()
+    zoom_after = driver.execute_script("return zoom")
+    print(f"  After pan+fit: {pan_only['bg']} bg pixels, zoom {zoom_before:.3f} -> {zoom_after:.3f}")
+    screenshot("test8_pan_only_fit")
+    assert pan_only["bg"] == 0, f"Black space after pan fit: {pan_only['bg']} px"
+    assert zoom_after <= zoom_before + 1e-6, f"Zoom increased when pan alone should suffice: {zoom_before} -> {zoom_after}"
+    print("  PASS\n")
+
     print("All tests passed!")
 
 except Exception as e:
