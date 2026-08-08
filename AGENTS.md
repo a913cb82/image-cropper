@@ -6,8 +6,24 @@ Batch-crops images to 9:20 portrait ratio via a localhost web UI.
 
 ```bash
 python3 -m venv .venv
-.venv/bin/pip install Flask Pillow numpy
+.venv/bin/pip install -r requirements.txt   # full pinned env (regenerate: .venv/bin/pip freeze > requirements.txt)
 ```
+
+Minimal runtime is just `Flask Pillow numpy`, but `requirements.txt` pins the
+full env including test/OCR extras below.
+
+### Driver / model fetches (network, one-time)
+
+- **Selenium (`test_render.py`)**: needs Google Chrome installed; the
+  chromedriver binary is auto-fetched at runtime by `webdriver-manager`
+  (`ChromeDriverManager().install()`). Run: `.venv/bin/python test_render.py`.
+- **EasyOCR**: `pip install -r` pulls the CPU `torch`/`torchvision` wheels.
+  Detection/recognition models (~100MB) download on first `easyocr.Reader`
+  call into `~/.EasyOCR/model/`; pre-fetch with
+  `.venv/bin/python -c "import easyocr; easyocr.Reader(['en'])"`.
+- **Playwright**: after `pip install -r`, fetch the browser with
+  `.venv/bin/playwright install chromium` (add `--with-deps` on Linux for
+  system libs); models not needed.
 
 ## Usage
 
